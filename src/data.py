@@ -111,27 +111,8 @@ def _run_minimal_exploratory_analysis(
 	plt.tight_layout()
 	plt.savefig(output_dirs["plots"] / "distribuicao_classe_alvo.png", dpi=150, bbox_inches='tight')
 	plt.close()
-	# Histogramas das variáveis numéricas
-	numeric_cols = df.select_dtypes(include=[np.number]).columns
-	numeric_cols = [col for col in numeric_cols if col != "classe"]  # Excluir classe se for numérica
-	n_cols = min(3, len(numeric_cols))
-	n_rows = (len(numeric_cols) + n_cols - 1) // n_cols
-	fig, axes = plt.subplots(n_rows, n_cols, figsize=(15, n_rows * 4))
-	if n_rows == 1 and n_cols == 1:
-		axes = np.array([axes])
-	axes = axes.flatten()
-	for idx, col in enumerate(numeric_cols):
-		axes[idx].hist(df[col].dropna(), bins=30, color='steelblue', edgecolor='black', alpha=0.7)
-		axes[idx].set_title(f"Histograma: {col}", fontsize=10, fontweight='bold')
-		axes[idx].set_xlabel(col)
-		axes[idx].set_ylabel("Frequência")
-		axes[idx].grid(axis='y', alpha=0.3)
-	# Remover subplots vazios
-	for idx in range(len(numeric_cols), len(axes)):
-		fig.delaxes(axes[idx])
-	plt.tight_layout()
-	plt.savefig(output_dirs["plots"] / "histogramas_numericas.png", dpi=150, bbox_inches='tight')
-	plt.close()
+	numeric_cols = df.columns # todas são numéricas
+	numeric_cols = [col for col in numeric_cols if col != "classe"]  # Exclui classe
 	# Matriz de correlação
 	if len(numeric_cols) > 1:
 		corr_matrix = df[numeric_cols].corr()
@@ -163,13 +144,52 @@ def _run_minimal_exploratory_analysis(
 			output_dirs["tables"] / "valores_faltantes.csv",
 			index=False,
 		)
+		
+def preprocess_data(data_path: str = "data/base_sintetica_media.csv") -> None:
+	# Análise exploratória
+	df = pd.read_csv(data_path)
+	output_dirs = {
+		"tables": Path("output/tables"),
+		"plots": Path("output/plots"),
+	}
+	output_dirs["tables"].mkdir(parents=True, exist_ok=True)
+	output_dirs["plots"].mkdir(parents=True, exist_ok=True)
+	_run_minimal_exploratory_analysis(df=df, output_dirs=output_dirs)
 
-data_path = "data/base_sintetica_media.csv"
-df = pd.read_csv(data_path)
-output_dirs = {
-    "tables": Path("output/tables"),
-    "plots": Path("output/plots"),
-}
-output_dirs["tables"].mkdir(parents=True, exist_ok=True)
-output_dirs["plots"].mkdir(parents=True, exist_ok=True)
-_run_minimal_exploratory_analysis(df=df, output_dirs=output_dirs)
+	# Imputação por média
+	for col in df.select_dtypes(include=[np.number]).columns:
+		df[col].fillna(df[col].mean(), inplace=True)
+	# Substituição de outliers por limites
+	for col in df.select_dtypes(include=['float64', 'int64']).columns:
+		q1 = df[col].quantile(0.25)
+		q3 = df[col].quantile(0.75)
+		iqr = q3 - q1
+		lower_bound = q1 - 1.5 * iqr
+		upper_bound = q3 + 1.5 * iqr
+		df[col] = df[col].clip(lower_bound, upper_bound) 
+	# Normalização Z-score
+	for col in df.select_dtypes(include=[np.number]).columns:
+		df[col] = (df[col] - df[col].mean()) / df[col].std()
+	# Histograma (após tratamento)
+	numeric_cols = df.columns # todas são numéricas
+	numeric_cols = [col for col in numeric_cols if col != "classe"]  # Exclui classe
+	n_cols = min(3, len(numeric_cols))
+	n_rows = (len(numeric_cols) + n_cols - 1) // n_cols
+	fig, axes = plt.subplots(n_rows, n_cols, figsize=(15, n_rows * 4))
+	if n_rows == 1 and n_cols == 1:
+		axes = np.array([axes])
+	axes = axes.flatten()
+	for idx, col in enumerate(numeric_cols):
+		axes[idx].hist(df[col].dropna(), bins=30, color='steelblue', edgecolor='black', alpha=0.7)
+		axes[idx].set_title(f"Histograma: {col}", fontsize=10, fontweight='bold')
+		axes[idx].set_xlabel(col)
+		axes[idx].set_ylabel("Frequência")
+		axes[idx].grid(axis='y', alpha=0.3)
+	# Remover subplots vazios
+	for idx in range(len(numeric_cols), len(axes)):
+		fig.delaxes(axes[idx])
+	plt.tight_layout()
+	plt.savefig(output_dirs["plots"] / "histogramas_numericas.png", dpi=150, bbox_inches='tight')
+	plt.close()
+	df.to_csv('data/database_tratada.csv', index=False)
+preprocess_data()

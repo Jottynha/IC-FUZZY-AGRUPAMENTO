@@ -1,5 +1,7 @@
 import pandas as pd
 import numpy as np
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import json
 from pathlib import Path
@@ -246,5 +248,6 @@ def preprocess_data(data_path: str = "data/base_sintetica_media.csv", random_sta
 	plt.savefig(output_dirs["plots"] / "histogramas_numericas_preprocessadas.png", dpi=150, bbox_inches='tight')
 	plt.close()
 	print(f"Histogramas salvos: histogramas_numericas_preprocessadas.png")
-
-preprocess_data()
+	
+if __name__ == "__main__":
+	preprocess_data()

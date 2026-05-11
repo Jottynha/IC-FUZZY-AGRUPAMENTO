@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from sklearn.cluster import KMeans
-
+EPS = 1e-8
 # Executa K-Means sobre a base preprocessada
 def clustering_kmeans(
 	data_path: str = "data/database_treino.csv",
@@ -97,7 +97,116 @@ def clustering_kmeans(
 		"centers": kmeans.cluster_centers_,
 		"inertia": kmeans.inertia_,
 		"kmeans_model": kmeans,
+		"feature_cols": feature_cols,
 	}
 
+# pertinência gaussiana por atributo (vetorial)
+def _gaussian(x: np.ndarray, center: np.ndarray, sigma: np.ndarray) -> np.ndarray:
+	denom = np.where(sigma <= 0, EPS, sigma)
+	z = (x - center) / denom
+	return np.exp(-0.5 * (z ** 2))
+
+# Cada cluster define uma regra do tipo: 
+# SE atributos estão próximos do centróide do cluster ENTÃO classe = classe majoritária.
+def train_mamdani(
+	df: pd.DataFrame,
+	feature_cols: list[str],
+	y_col: str = "classe",
+	clusters: pd.Series | None = None,
+	n_rules: int | None = None,
+	sigma_scale: float = 1.0,
+	output_tables_dir: Path = Path("output/tables"),
+) -> dict:
+	print("\n[17] Treinando modelo Mamdani a partir dos clusters")
+	output_tables_dir.mkdir(parents=True, exist_ok=True)
+	if clusters is None:
+		if n_rules is None:
+			raise ValueError("Se 'clusters' não for fornecido, especifique 'n_rules'.")
+		kmeans = KMeans(n_clusters=n_rules, random_state=42, n_init=10)
+		X_all = df[feature_cols].to_numpy()
+		labels = kmeans.fit_predict(X_all)
+		df = df.copy()
+		df["cluster"] = labels
+		centers = kmeans.cluster_centers_
+	else:
+		df = df.copy()
+		df["cluster"] = clusters
+		centers = df.groupby("cluster")[feature_cols].mean().to_numpy()
+	global_std = df[feature_cols].std().replace(0, EPS).to_numpy()
+	n_rules = centers.shape[0]
+	sigmas = np.zeros_like(centers)
+	for i in range(n_rules):
+		grp = df[df["cluster"] == i][feature_cols]
+		if len(grp) > 1:
+			s = grp.std().to_numpy()
+			s = np.where(s <= 0, global_std, s)
+		else:
+			s = global_std
+		sigmas[i] = s * float(sigma_scale)
+	cluster_majority = df.groupby("cluster")[y_col].agg(lambda s: s.mode().iloc[0]).to_dict()
+	centers_arr = np.array(centers)
+	sigmas_arr = np.array(sigmas)
+	rules = []
+	for r in range(n_rules):
+		class_counts = df[df["cluster"] == r][y_col].value_counts().sort_index()
+		support = int(class_counts.sum())
+		majority_class = int(cluster_majority[r])
+		confidence = float(class_counts.max() / support) if support else 0.0
+		rules.append(
+			{
+				"rule_id": int(r),
+				"cluster_id": int(r),
+				"support": support,
+				"majority_class": majority_class,
+				"confidence": round(confidence, 4),
+				"center": centers_arr[r].round(4).tolist(),
+				"sigma": sigmas_arr[r].round(4).tolist(),
+			}
+		)
+	model = {
+		"feature_cols": feature_cols,
+		"centers": centers_arr.tolist(),
+		"sigmas": sigmas_arr.tolist(),
+		"rules": rules,
+		"cluster_majority": {int(k): int(v) for k, v in cluster_majority.items()},
+		"sigma_scale": float(sigma_scale),
+	}
+	model_json = output_tables_dir / "mamdani_model.json"
+	with open(model_json, "w") as f:
+		json.dump(model, f, indent=2, ensure_ascii=False)
+	print(f"Modelo Mamdani salvo: {model_json}")
+	print("\n[18] Resumo das regras Mamdani")
+	for rule in rules:
+		print(
+			f"Regra {rule['rule_id']} -> classe {rule['majority_class']} "
+			f"(suporte={rule['support']}, confiança={rule['confidence']:.4f})"
+		)
+	def predict_fn(X_new: np.ndarray) -> np.ndarray:
+		Xn = np.atleast_2d(X_new)
+		M = Xn.shape[0]
+		mu = np.zeros((M, n_rules))
+		for r in range(n_rules):
+			mu_feat = _gaussian(Xn, centers_arr[r], sigmas_arr[r])
+			# Mamdani: operador min para antecedente
+			mu[:, r] = np.min(mu_feat, axis=1)
+		possible_labels = np.sort(df[y_col].unique())
+		y_pred = np.zeros(M, dtype=int)
+		for i in range(M):
+			scores = {int(c): 0.0 for c in possible_labels}
+			for r in range(n_rules):
+				cls = int(cluster_majority[r])
+				scores[cls] = max(scores[cls], float(mu[i, r]))
+			y_pred[i] = max(scores.items(), key=lambda kv: kv[1])[0]
+		return y_pred
+	model["predict_fn"] = predict_fn
+	return model
+
 if __name__ == "__main__":
-	clustering_kmeans()
+    clustering_result = clustering_kmeans()
+    train_mamdani(
+        df=clustering_result["df_clustered"],
+        feature_cols=clustering_result["feature_cols"],
+        clusters=clustering_result["df_clustered"]["cluster"],
+        sigma_scale=1.0,
+    )
+ 

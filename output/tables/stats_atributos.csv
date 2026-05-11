@@ -1,0 +1,8 @@
+atributo,tipo,valores_unicos,valores_faltantes,percentual_faltantes
+atributo_1,float64,9968,14,0.14
+atributo_2,float64,9596,18,0.18
+atributo_3,float64,6521,12,0.12
+atributo_4,float64,9971,11,0.11
+atributo_5,float64,9912,20,0.2
+atributo_6,float64,8640,15,0.15
+classe,int64,4,0,0.0

@@ -1,0 +1,9 @@
+total_registros,total_atributos,atributos_numericos,atributos_categoricos,valores_faltantes,percentual_faltantes,outliers_totais,percentual_outliers,secao,atributo,tipo,valores_unicos,outliers
+10000.0,7.0,7.0,0.0,90,0.13,38.0,0.38,Resumo Geral,,,,
+,,,,14,0.14,,,Atributos,atributo_1,float64,9968.0,0.0
+,,,,18,0.18,,,Atributos,atributo_2,float64,9596.0,0.0
+,,,,12,0.12,,,Atributos,atributo_3,float64,6521.0,0.0
+,,,,11,0.11,,,Atributos,atributo_4,float64,9971.0,0.0
+,,,,20,0.2,,,Atributos,atributo_5,float64,9912.0,16.0
+,,,,15,0.15,,,Atributos,atributo_6,float64,8640.0,22.0
+,,,,0,0.0,,,Atributos,classe,int64,4.0,0.0

@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import json
 from pathlib import Path
 from sklearn.model_selection import train_test_split
 
@@ -19,11 +20,11 @@ def sample_stratified_df(
             random_state=random_state,
         )
     return df.reset_index(drop=True)
- 
-def prepare_features(df:pd.DataFrame,random_state:int=42):
+# Função para preparar atributos e alvo além de realizar split treino/teste:
+def prepare_features(df: pd.DataFrame, random_state: int = 42):
 	X = df.drop(columns=["classe"])
 	y = df["classe"].values
-	# Split treino/teste (80% treino, 20% teste) com estratificação opcional
+	# Split treino/teste (80% treino, 20% teste) com estratificação
 	X_train, X_test, y_train, y_test = train_test_split(
 		X, y,
 		test_size=0.2,
@@ -43,11 +44,13 @@ def prepare_features(df:pd.DataFrame,random_state:int=42):
 		features_names,
 	)
 
+# Análise Exploratória
 def _run_minimal_exploratory_analysis(
 	df: pd.DataFrame,
 	output_dirs: dict[str, Path],
 ) -> None:
-	# Verificação de outliers [IF(x < mu - 3std) OR IF(x > mu + 3std)]
+	print("[INFO] Iniciando análise exploratória")
+	# Verificação de outliers [método 3-sigma]
 	outliers_df = pd.DataFrame({
 		"atributo": df.select_dtypes(include=[np.number]).columns,
 		"outliers_count": [
@@ -55,7 +58,6 @@ def _run_minimal_exploratory_analysis(
 			for col in df.select_dtypes(include=[np.number]).columns
 		],
 	})
-	# Resumo geral da base
 	resumo_geral = pd.DataFrame(
 		[
 			{
@@ -70,10 +72,6 @@ def _run_minimal_exploratory_analysis(
 			}
 		]
 	)
-	resumo_geral.to_csv(
-		output_dirs["tables"] / "resumo_exploratorio.csv",
-		index=False,
-	)
 	# Estatísticas por atributo
 	stats_por_atributo = pd.DataFrame({
 		"atributo": df.columns,
@@ -83,8 +81,12 @@ def _run_minimal_exploratory_analysis(
 		"percentual_faltantes": (df.isnull().sum() / len(df) * 100).round(2).values,
 		"outliers": outliers_df["outliers_count"].values,
 	})
-	stats_por_atributo.to_csv(
-		output_dirs["tables"] / "stats_atributos.csv",
+	stats_completas = pd.concat([
+		resumo_geral.assign(secao="Resumo Geral"),
+		stats_por_atributo.assign(secao="Atributos")
+	], ignore_index=True, sort=False)
+	stats_completas.to_csv(
+		output_dirs["tables"] / "analise_exploratoria_completa.csv",
 		index=False,
 	)
 	stats_descritivas = df.select_dtypes(include=[np.number]).describe().T
@@ -124,7 +126,6 @@ def _run_minimal_exploratory_analysis(
 		ax.set_yticklabels(numeric_cols)
 		ax.set_title("Matriz de Correlação", fontsize=12, fontweight='bold')
 		plt.colorbar(im, ax=ax)
-		# Adicionar valores de correlação na matriz
 		for i in range(len(numeric_cols)):
 			for j in range(len(numeric_cols)):
 				text = ax.text(j, i, f'{corr_matrix.iloc[i, j]:.2f}',
@@ -132,64 +133,118 @@ def _run_minimal_exploratory_analysis(
 		plt.tight_layout()
 		plt.savefig(output_dirs["plots"] / "matriz_correlacao.png", dpi=150, bbox_inches='tight')
 		plt.close()
-	# Salvar resumo de valores faltantes por atributo
-	missing_data = pd.DataFrame({
-		"atributo": df.columns,
-		"total_faltantes": df.isnull().sum().values,
-		"percentual": (df.isnull().sum() / len(df) * 100).round(2).values,
-	})
-	missing_data = missing_data[missing_data["total_faltantes"] > 0].sort_values("total_faltantes", ascending=False)
-	if len(missing_data) > 0:
-		missing_data.to_csv(
-			output_dirs["tables"] / "valores_faltantes.csv",
-			index=False,
-		)
-		
-def preprocess_data(data_path: str = "data/base_sintetica_media.csv") -> None:
-	# Análise exploratória
-	df = pd.read_csv(data_path)
+	print("[INFO] Análise exploratória concluída")
+
+def preprocess_data(data_path: str = "data/base_sintetica_media.csv", random_state: int = 42) -> None:
+	"""
+	Pipeline completo do preprocessamento:
+	[1] Análise exploratória (dados originais)
+	[2] Split treino/teste (com estratificação)
+	[3] Imputação de valores faltantes (apenas com estatísticas do treino)
+	[4] Tratamento de outliers (apenas com treino)
+	[5] Normalização Z-score (apenas com treino)
+	[6] Salva parâmetros de preprocessamento para aplicar ao teste
+	[7] Gera histogramas pós-preprocessamento
+	"""
+	print("\n[1] Carregando base de dados")
+	df_original = pd.read_csv(data_path)
+	print(f"Base carregada: {df_original.shape[0]} registros x {df_original.shape[1]} atributos")
 	output_dirs = {
 		"tables": Path("output/tables"),
 		"plots": Path("output/plots"),
 	}
 	output_dirs["tables"].mkdir(parents=True, exist_ok=True)
 	output_dirs["plots"].mkdir(parents=True, exist_ok=True)
-	_run_minimal_exploratory_analysis(df=df, output_dirs=output_dirs)
-
-	# Imputação por média
-	for col in df.select_dtypes(include=[np.number]).columns:
-		df[col].fillna(df[col].mean(), inplace=True)
-	# Substituição de outliers por limites
-	for col in df.select_dtypes(include=['float64', 'int64']).columns:
-		q1 = df[col].quantile(0.25)
-		q3 = df[col].quantile(0.75)
-		iqr = q3 - q1
-		lower_bound = q1 - 1.5 * iqr
-		upper_bound = q3 + 1.5 * iqr
-		df[col] = df[col].clip(lower_bound, upper_bound) 
-	# Normalização Z-score
-	for col in df.select_dtypes(include=[np.number]).columns:
-		df[col] = (df[col] - df[col].mean()) / df[col].std()
-	# Histograma (após tratamento)
-	numeric_cols = df.columns # todas são numéricas
-	numeric_cols = [col for col in numeric_cols if col != "classe"]  # Exclui classe
-	n_cols = min(3, len(numeric_cols))
-	n_rows = (len(numeric_cols) + n_cols - 1) // n_cols
+	print("\n[2] Executando análise exploratória")
+	_run_minimal_exploratory_analysis(df=df_original, output_dirs=output_dirs)
+	print("\n[3] Separando em treino (80%) e teste (20%)")
+	X = df_original.drop(columns=["classe"])
+	y = df_original["classe"].values
+	X_train, X_test, y_train, y_test = train_test_split(
+		X, y,
+		test_size=0.2,
+		stratify=y,
+		random_state=random_state
+	)
+	df_train = X_train.copy()
+	df_train["classe"] = y_train
+	df_test = X_test.copy()
+	df_test["classe"] = y_test
+	print(f"Treino: {len(df_train)} registros")
+	print(f"Teste: {len(df_test)} registros")
+	# Dicionário para armazenar parâmetros de preprocessamento
+	preprocessing_params = {
+		"random_state": random_state,
+		"imputacao": {},
+		"outliers": {},
+		"normalizacao": {}
+	}
+	print("\n[4] Imputando valores faltantes")
+	numeric_cols = df_train.select_dtypes(include=[np.number]).columns.tolist()
+	for col in numeric_cols:
+		if col != "classe":
+			mean_value = df_train[col].mean()
+			preprocessing_params["imputacao"][col] = float(mean_value)
+			df_train[col] = df_train[col].fillna(mean_value)
+			df_test[col] = df_test[col].fillna(mean_value)
+	print(f"Imputação realizada em {len(preprocessing_params['imputacao'])} colunas")
+	print("\n[5] Tratando outliers com método IQR")
+	for col in numeric_cols:
+		if col != "classe":
+			q1 = df_train[col].quantile(0.25)
+			q3 = df_train[col].quantile(0.75)
+			iqr = q3 - q1
+			lower_bound = q1 - 1.5 * iqr
+			upper_bound = q3 + 1.5 * iqr
+			preprocessing_params["outliers"][col] = {
+				"lower_bound": float(lower_bound),
+				"upper_bound": float(upper_bound)
+			}
+			df_train[col] = df_train[col].clip(lower_bound, upper_bound)
+			df_test[col] = df_test[col].clip(lower_bound, upper_bound)
+	print(f"Tratamento de outliers aplicado a {len(preprocessing_params['outliers'])} colunas")
+	print("\n[6] Normalizando com Z-score")
+	for col in numeric_cols:
+		if col != "classe":
+			mean_value = df_train[col].mean()
+			std_value = df_train[col].std()
+			preprocessing_params["normalizacao"][col] = {
+				"media": float(mean_value),
+				"std": float(std_value)
+			}
+			df_train[col] = (df_train[col] - mean_value) / std_value
+			df_test[col] = (df_test[col] - mean_value) / std_value
+	print(f"Normalização Z-score aplicada a {len(preprocessing_params['normalizacao'])} colunas")
+	print("\n[7] Salvando parâmetros de preprocessamento")
+	params_path = output_dirs["tables"] / "preprocessing_params.json"
+	with open(params_path, 'w') as f:
+		json.dump(preprocessing_params, f, indent=2)
+	print(f"Parâmetros salvos em: {params_path}")
+	print("\n[8] Salvando datasets preprocessados")
+	df_train.to_csv('data/database_treino.csv', index=False)
+	df_test.to_csv('data/database_teste.csv', index=False)
+	print(f"Treino: data/database_treino.csv")
+	print(f"Teste: data/database_teste.csv")
+	print("\n[9] Gerando histogramas pós-preprocessamento")
+	numeric_cols_plot = [col for col in numeric_cols if col != "classe"]
+	n_cols = min(3, len(numeric_cols_plot))
+	n_rows = (len(numeric_cols_plot) + n_cols - 1) // n_cols
 	fig, axes = plt.subplots(n_rows, n_cols, figsize=(15, n_rows * 4))
 	if n_rows == 1 and n_cols == 1:
 		axes = np.array([axes])
 	axes = axes.flatten()
-	for idx, col in enumerate(numeric_cols):
-		axes[idx].hist(df[col].dropna(), bins=30, color='steelblue', edgecolor='black', alpha=0.7)
-		axes[idx].set_title(f"Histograma: {col}", fontsize=10, fontweight='bold')
+	for idx, col in enumerate(numeric_cols_plot):
+		axes[idx].hist(df_train[col].dropna(), bins=30, color='steelblue', edgecolor='black', alpha=0.7)
+		axes[idx].set_title(f"Histograma (Treino): {col}", fontsize=10, fontweight='bold')
 		axes[idx].set_xlabel(col)
 		axes[idx].set_ylabel("Frequência")
 		axes[idx].grid(axis='y', alpha=0.3)
 	# Remover subplots vazios
-	for idx in range(len(numeric_cols), len(axes)):
+	for idx in range(len(numeric_cols_plot), len(axes)):
 		fig.delaxes(axes[idx])
 	plt.tight_layout()
-	plt.savefig(output_dirs["plots"] / "histogramas_numericas.png", dpi=150, bbox_inches='tight')
+	plt.savefig(output_dirs["plots"] / "histogramas_numericas_preprocessadas.png", dpi=150, bbox_inches='tight')
 	plt.close()
-	df.to_csv('data/database_tratada.csv', index=False)
+	print(f"Histogramas salvos: histogramas_numericas_preprocessadas.png")
+
 preprocess_data()

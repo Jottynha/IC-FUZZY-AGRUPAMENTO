@@ -100,12 +100,6 @@ def clustering_kmeans(
 		"feature_cols": feature_cols,
 	}
 
-# pertinência gaussiana por atributo (vetorial)
-def _gaussian(x: np.ndarray, center: np.ndarray, sigma: np.ndarray) -> np.ndarray:
-	denom = np.where(sigma <= 0, EPS, sigma)
-	z = (x - center) / denom
-	return np.exp(-0.5 * (z ** 2))
-
 # Cada cluster define uma regra do tipo: 
 # SE atributos estão próximos do centróide do cluster ENTÃO classe = classe majoritária.
 def train_mamdani(
@@ -182,21 +176,21 @@ def train_mamdani(
 			f"(suporte={rule['support']}, confiança={rule['confidence']:.4f})"
 		)
 	def predict_fn(X_new: np.ndarray) -> np.ndarray:
+		# Calcula graus de ativação de todas as regras para todas as amostras simultaneamente.
 		Xn = np.atleast_2d(X_new)
 		M = Xn.shape[0]
-		mu = np.zeros((M, n_rules))
-		for r in range(n_rules):
-			mu_feat = _gaussian(Xn, centers_arr[r], sigmas_arr[r])
-			# Mamdani: operador min para antecedente
-			mu[:, r] = np.min(mu_feat, axis=1)
+		z = (Xn[:, None, :] - centers_arr[None, :, :]) / np.where(
+			sigmas_arr[None, :, :] <= 0, EPS, sigmas_arr[None, :, :]
+		)
+		mu_feat_all = np.exp(-0.5 * (z ** 2))
+		mu = np.min(mu_feat_all, axis=2)
 		possible_labels = np.sort(df[y_col].unique())
 		y_pred = np.zeros(M, dtype=int)
-		for i in range(M):
-			scores = {int(c): 0.0 for c in possible_labels}
-			for r in range(n_rules):
-				cls = int(cluster_majority[r])
-				scores[cls] = max(scores[cls], float(mu[i, r]))
-			y_pred[i] = max(scores.items(), key=lambda kv: kv[1])[0]
+		for cls in possible_labels:
+			mask = np.array([int(cluster_majority[r]) == cls for r in range(n_rules)])
+			if np.any(mask):
+				scores_cls = np.max(mu[:, mask], axis=1)
+				y_pred = np.where(scores_cls > mu[np.arange(M), y_pred], cls, y_pred)
 		return y_pred
 	model["predict_fn"] = predict_fn
 	return model

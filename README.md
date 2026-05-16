@@ -105,22 +105,115 @@ No projeto, essas duas métricas ajudam a julgar se uma regra realmente vale a p
 
 - `output/tables/mamdani_model.json`: estrutura com centróides, sigmas e regras.
 
-## Arquivos gerados
+## Otimizações de Desempenho
 
-- `data/database_treino.csv`: base de treino preprocessada.
-- `data/database_teste.csv`: base de teste preprocessada.
-- `output/tables/preprocessing_params.json`: parâmetros do preprocessamento.
-- `output/tables/cluster_centers.csv`: centróides dos clusters.
-- `output/tables/clustering_params.json`: parâmetros do K-Means.
-- `output/tables/mamdani_model.json`: modelo Mamdani com regras e parâmetros.
+### Vetorização da Predição Mamdani
 
-## Execução
+O módulo `src/fuzzy.py` implementa predição totalmente vetorizada usando **broadcasting NumPy**, eliminando loops e melhorando performance
 
-Para gerar o preprocessamento e os agrupamentos:
+## Avaliação e Comparação de Modelos
+
+### Módulo de Inferência Reutilizável
+
+O módulo `src/inference.py` oferece uma interface limpa para usar o modelo treinado em novos dados:
+
+```python
+from src.inference import MamdaniInference
+inference = MamdaniInference("output/tables/mamdani_model.json")
+y_pred = inference.predict(X_test)
+scores = inference.predict_proba(X_test)  # Graus de confiança por classe
+info = inference.get_model_info()  # Informações do modelo
+```
+
+Carrega-se modelo JSON sem dependências externas com predição vetorizada em dados novos, scores de confiança por classe e metadados do modelo (features, regras, parâmetros).
+
+### Script de Avaliação
+
+O script `src/evaluate.py` calcula métricas completas no conjunto de teste:
 
 ```bash
+python3 src/evaluate.py
+```
+
+**Métricas Computadas:**
+- Acurácia geral
+- Precisão (ponderada e por classe)
+- Recall (ponderada e por classe)
+- F1-Score (ponderado e por classe)
+- Matriz de confusão
+
+**Saídas:**
+- Relatório formatado no terminal
+- JSON com métricas detalhadas: `output/tables/evaluation_metrics.json`
+
+### Comparação Automática de Configurações de k
+
+O script `src/compare_clusters.py` automatiza a busca pelo número ótimo de clusters:
+
+```bash
+python3 src/compare_clusters.py
+```
+
+O procedimento tem-se abaixo:
+1) Testa múltiplos valores de k: [3, 4, 5, 6, 8]
+2) Para cada k: clustering em seguida do treinamento Mamdani e por fim avaliação no teste
+3) Registra acurácia, F1-Score e tempo de execução
+4) Salva tabela comparativa: `output/tables/cluster_comparison.csv`
+
+**Resultado esperado:**
+
+| k | Acurácia | F1-Score | Tempo (s) |
+|---|----------|----------|-----------|
+| 4 | 0.6180 | 0.5793 | 1.128 |
+| 8 | 0.6180 | 0.5764 | 1.545 |
+| 5 | 0.6065 | 0.5782 | 1.367 |
+| 6 | 0.5870 | 0.5263 | 1.598 |
+| 3 | 0.5750 | 0.5482 | 1.299 |
+
+Assim k=4 e k=8 apresentam acurácia idêntica então k=4 oferece melhor trade-off entre simplicidade (4 regras) e performance (1.13s).
+
+## Arquivos Gerados
+
+### Dados Preprocessados
+- `data/database_treino.csv`: base de treino normalizada
+- `data/database_teste.csv`: base de teste normalizada
+
+### Parâmetros de Treinamento
+- `output/tables/preprocessing_params.json`: parâmetros de normalização
+- `output/tables/cluster_centers.csv`: centróides dos k clusters
+- `output/tables/clustering_params.json`: configuração do K-Means
+
+### Modelos e Resultados
+- `output/tables/mamdani_model.json`: modelo Mamdani com centróides, sigmas e regras
+- `output/tables/evaluation_metrics.json`: métricas de desempenho (acurácia, precisão, recall, F1)
+- `output/tables/cluster_comparison.csv`: comparação de performance para k ∈ [3, 4, 5, 6, 8]
+
+### Visualizações
+- `output/plots/distribuicao_classe_alvo.png`: histograma das classes
+- `output/plots/matriz_correlacao.png`: matriz de correlação dos atributos
+- `output/plots/histogramas_numericas_preprocessadas.png`: distribuições dos atributos normalizados
+- `output/plots/distribuicao_clusters.png`: visualização dos clusters encontrados
+
+## Execução Completa
+
+### Pipeline Básico (Preprocessamento + Treinamento)
+
+```bash
+# Etapa 1: Preprocessamento e análise exploratória
 python3 src/data.py
+# Etapa 2: Agrupamento K-Means e modelo Mamdani (k=4)
 python3 src/fuzzy.py
+```
+
+### Avaliação e Experimentos (Opcional)
+
+```bash
+# Avaliação no conjunto de teste (k=4)
+python3 src/evaluate.py
+# Comparação de diferentes valores de k
+python3 src/compare_clusters.py
+# Usar modelo em novos dados
+python3 -c "from src.inference import MamdaniInference; inf = MamdaniInference('output/tables/mamdani_model.json'); print(inf.predict(X_novo))"
 ```
 
 

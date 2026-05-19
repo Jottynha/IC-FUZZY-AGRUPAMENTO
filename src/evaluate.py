@@ -19,6 +19,7 @@ def evaluate_model(
 	X_test: np.ndarray | pd.DataFrame,
 	y_test: np.ndarray | pd.Series,
 	model_path: str = "output/tables/mamdani_model.json",
+	model: dict | None = None,
 	verbose: bool = True,
 ) -> dict:
 	"""
@@ -31,8 +32,13 @@ def evaluate_model(
 	Retorna:
 		Dict com métricas: accuracy, precision, recall, f1, cm
 	"""
-	inference = MamdaniInference(model_path)
-	y_pred = inference.predict(X_test)
+	if model is not None:
+		if isinstance(X_test, pd.DataFrame):
+			X_test = X_test.to_numpy()
+		y_pred = model["predict_fn"](X_test)
+	else:
+		inference = MamdaniInference(model_path)
+		y_pred = inference.predict(X_test)
 	if isinstance(y_test, pd.Series):
 		y_test = y_test.to_numpy()
 	acc = accuracy_score(y_test, y_pred)

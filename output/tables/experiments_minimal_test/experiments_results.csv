@@ -1,0 +1,2 @@
+seed,k,accuracy,precision_weighted,recall_weighted,f1_weighted,confusion_matrix,time_cluster_s,time_train_s,time_eval_s,total_time_s
+42,3,0.436,0.42250097420310184,0.436,0.42098002410543167,"[[379, 0, 0, 12], [58, 0, 0, 23], [31, 0, 0, 291], [2, 0, 0, 493]]",0.2692,0.0326,0.0426,0.3444
